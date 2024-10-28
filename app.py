@@ -2,11 +2,21 @@ import os
 import streamlit as st
 import google.generativeai as genai
 from dotenv import load_dotenv
+from typing import IO
+from io import BytesIO
+import requests
+from elevenlabs import VoiceSettings
+from elevenlabs.client import ElevenLabs
 
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 genai.configure(api_key=api_key)
+
+client = ElevenLabs(
+    api_key=ELEVENLABS_API_KEY,
+)
 
 pre_prompt = (
     """
@@ -57,3 +67,27 @@ if st.button("Generate") and input_prompt:
         
     st.write(response.text)
     st.write(st.session_state.chat.history)
+
+    voice = client.text_to_speech.convert(
+        voice_id="pNInz6obpgDQGcFmaJgB",
+        optimize_streaming_latency="0",
+        output_format="mp3_22050_32",
+        text=response.text,
+        model_id="eleven_multilingual_v2",
+        voice_settings = VoiceSettings(
+            stability=0.3,         # Daha doğal bir ses için 0.2 - 0.4 arası
+            similarity_boost=1.0,  # Ses benzerliğini koruyarak daha doğal
+            style=0.2,             # Daha doğal ve akıcı bir ton için düşük bir değer
+            use_speaker_boost=True, # Sesin etkileyici ve anlaşılır olmasını sağlamak
+        )
+    )
+
+    audio_stream = BytesIO()
+
+    for chunk in voice:
+        if chunk:
+            audio_stream.write(chunk)
+
+    audio_stream.seek(0)
+
+    st.audio(audio_stream, format="audio/mp3")
