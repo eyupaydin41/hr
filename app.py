@@ -3,7 +3,7 @@ import streamlit as st
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-from elevenlabs_tts import text_to_speech 
+from googlecloud_tts import text_to_speech 
 
 load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
