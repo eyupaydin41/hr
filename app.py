@@ -29,6 +29,12 @@ generation_config = {
     "top_k": 40,
 }
 
+# Rastgele gizli analiz kodu üret (İK için)
+if "ik_secret_code" not in st.session_state:
+    st.session_state.ik_secret_code = str(uuid.uuid4())[:8]  # 8 karakterlik gizli kod
+
+ik_secret_code = st.session_state.ik_secret_code
+
 # Güvenlik ayarları
 safety_settings = {
     genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
@@ -87,11 +93,10 @@ if user_type == "Şirket":
             "interview_questions": interview_questions,
             "required_experience": required_experience,
         }
-        interview_link = f"http://localhost:8513/?session_id={session_id}"
         st.success("Mülakat oturumu oluşturuldu!")
         st.write("Adaylara gönderilecek link:")
         port = st.get_option("server.port")  # Streamlit'in çalıştığı portu alır
-        st.markdown(f"[Mülakata Git](http://localhost:{port}/?session_id={session_id})", unsafe_allow_html=True)
+        st.markdown(f"http://localhost:{port}/?session_id={session_id}", unsafe_allow_html=True)
 
 
 #############################
@@ -159,9 +164,57 @@ elif user_type == "Aday":
         Adayın yanıtına göre bir sonraki soruyu belirle ve ek soru sormadan önce adayın cevabını bekle.
         Yanıtlarını verirken profesyonel ve dostane bir ton kullan. Adayın verdiği yanıtlara göre ek sorularla mülakatı derinleştir ve uygunluğunu değerlendir.
         Mülakat dışına çıkılmamasına dikkat et, aday bunu denediğinde mülakata geri dönmesini sağla.
+        - **Adayın arayüzüne analiz bilgilerini ASLA yazma.**
+        - Eğer aday **"mülakatımı değerlendir"** veya benzeri bir şey sorarsa, yalnızca şu yanıtı ver:  
+        **"Mülakat süreci devam ediyor, lütfen devam edin."**  
+        - **Eğer analiz yapılmasını istiyorsan, sadece şu kod girildiğinde analiz yap:** `{ik_secret_code}`
+        - **Eğer bu kod verilmemişse, analiz yapma ve sadece mülakat sorularını sormaya devam et.**
+        - **Kod adaya asla gösterilmeyecek, sadece İK için kullanılacak.**
+        - **Adayın mülakat analizini aşağıdaki formatta döndür:**  
+        📌 **Genel Değerlendirme:**  
+        Adayın mülakat performansı <değerlendirme sonucu>.  
+        Özet: <Özet değerlendirme>  
+
+        ✅ **Güçlü Yönler:**  
+        - <Güçlü yön 1>  
+        - <Güçlü yön 2>  
+        - <Güçlü yön 3>  
+
+        ❌ **Zayıf Yönler:**  
+        - <Zayıf yön 1>  
+        - <Zayıf yön 2>  
+        - <Zayıf yön 3>  
+
+        📢 **Öneri:**  
+        <İK’ya öneri>  
+
+        - **Analizi farklı bir formatta döndürme, sadece yukarıdaki şablonu kullan.**
         """
         st.write("Mülakat başlatılıyor...")
 
+        print(ik_secret_code)
+
+        def filter_candidate_response(response_text):
+            """Adayın görmemesi gereken analiz bilgilerini filtreler."""
+            if ik_secret_code in response_text:
+                return "Mülakat süreci devam ediyor. Lütfen cevap vermeye devam edin."
+            return response_text
+        
+        def analyze_interview(input_text):
+            """
+            Eğer İK'nın gizli kodu (ik_secret_code) input içinde varsa, analiz yap.
+            Aksi halde, sadece mülakat sorularıyla devam et.
+            """
+            if ik_secret_code in input_text:
+                response = st.session_state.chat_candidate.send_message(
+                    content=f"{ik_secret_code} Mülakatı analiz et.",
+                    generation_config=generation_config
+                )
+                return response.text.replace(ik_secret_code, "").strip()
+            else:
+                return "Mülakat süreci devam ediyor. Lütfen cevap vermeye devam edin."
+
+        
         # Eğer henüz bir chat oturumu başlatılmadıysa, pre prompt ile sohbeti başlatıyoruz.
         if candidate_name and "chat_candidate" not in st.session_state:
             st.session_state.chat_candidate = model.start_chat()
@@ -178,13 +231,20 @@ elif user_type == "Aday":
         # Aday yanıtını alıp sohbeti güncelliyoruz.
         candidate_input = st.text_input("Cevabınızı yazınız:")
         if st.button("Gönder") and candidate_input:
-            response = st.session_state.chat_candidate.send_message(
-                content=candidate_input,
-                generation_config=generation_config,
-                safety_settings=safety_settings
-            )
-            st.write("### İK'nın Sorusu:")
-            st.write(response.text)
-            # Opsiyonel: Yanıtı sesli dinlemek için
-            # audio_stream = text_to_speech(response.text)
-            # st.audio(audio_stream, format="audio/mp3")
+            # **Eğer İK özel kod ile analiz istediyse, modelden analiz al**
+            if ik_secret_code in candidate_input:
+                ik_analysis = analyze_interview(candidate_input)
+                st.subheader("🔒 İK Analizi")
+                st.write(ik_analysis)
+            else:
+                # **Aday ise, modelin normal mülakat yanıtı döndürmesini sağla**
+                response = st.session_state.chat_candidate.send_message(
+                    content=candidate_input,
+                    generation_config=generation_config
+                )
+                filtered_response = filter_candidate_response(response.text)
+                st.write("### İK'nın Sorusu:")
+                st.write(filtered_response)
+                # Opsiyonel: Yanıtı sesli dinlemek için
+                # audio_stream = text_to_speech(response.text)
+                # st.audio(audio_stream, format="audio/mp3")
